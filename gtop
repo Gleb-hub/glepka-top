@@ -1,0 +1,34 @@
+#!/bin/bash
+
+time=$(date --rfc-email | cut -d " " -f 5)
+load_avarage="$(cat /proc/loadavg | cut -d " " -f 1) 
+  $(cat /proc/loadavg | cut -d " " -f 2) 
+  $(cat /proc/loadavg | cut -d " " -f 3)"
+
+total=0
+running=0
+sleeping=0
+stopped=0
+zombie=0
+
+for item in $(ls /proc/ | grep '[0-9]')
+do
+  curr=$([[ -f "/proc/$item/stat" ]] && cat /proc/$item/stat | cut -d " " -f 3) || continue
+
+  if [[ "$curr" == "R" ]]; then
+    (( running += 1 ))
+  elif [[ "$curr" == "T" ]]; then
+    (( stopped += 1 ))
+  elif [[ "$curr" == "Z" ]]; then
+    (( zombie += 1 ))
+  else
+    (( sleeping += 1 ))
+  fi
+
+  (( total += 1 ))
+
+done
+echo "Glepka-top: $time, load avarage: $load_avarage"
+echo "Tasks: $total total, $running running, $sleeping sleeping, $stopped stopped, $zombie zombie"
+
+
