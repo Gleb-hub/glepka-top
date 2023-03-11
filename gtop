@@ -1,34 +1,65 @@
 #!/bin/bash
-
 time=$(date --rfc-email | cut -d " " -f 5)
-load_avarage="$(cat /proc/loadavg | cut -d " " -f 1) 
-  $(cat /proc/loadavg | cut -d " " -f 2) 
-  $(cat /proc/loadavg | cut -d " " -f 3)"
+printf "glop - $time " 
 
+awk '{ printf ("up %dd:%dh:%dm:%ds ", $time/86400, $time%86400/3600, $time%3600/60, $time%60 )}' /proc/uptime
+awk '{ printf "load avarage: " $1 " " $2 " " $3 "\n"}' /proc/loadavg
+
+running=$(grep " R " /proc/[0-9]*/stat | wc -l)
+sleeping=$(grep " S\| I " /proc/[0-9]*/stat | wc -l)
+stopped=$(grep " T " /proc/[0-9]*/stat | wc -l)
+zombie=$(grep " Z " /proc/[0-9]*/stat | wc -l)
 total=0
-running=0
-sleeping=0
-stopped=0
-zombie=0
+(( total+=running+sleeping+stopped+zombie ))
+printf "Tasks: $total total, $running running, $sleeping sleeping, $stopped stopped, $zombie zombie\n"
 
-for item in $(ls /proc/ | grep '[0-9]')
+awk '/MemTotal/{printf("MiB Mem : %0.1f total, ", $2/1024)}' /proc/meminfo
+awk '/MemFree/{printf("%0.1f free\n", $2/1024)}' /proc/meminfo
+
+awk '/SwapTotal/{printf("MiB Mem : %0.1f total, ", $2/1024)}' /proc/meminfo
+awk '/SwapFree/{printf("%0.1f free\n", $2/1024)}' /proc/meminfo
+
+printf "PID\tUSER\tPR\tNI\tVIRT\tS\t%%CPU\tTIME+\tCOMMAND\n"
+
+for i in /proc/[0-9]*/stat 
 do
-  curr=$([[ -f "/proc/$item/stat" ]] && cat /proc/$item/stat | cut -d " " -f 3) || continue
+  
+  PROCESS_STAT=($(sed -E 's/\([^)]+\)/X/' "/proc/$pid/stat"))
+  pid=$(awk '{print $1}' $i)
+  uid=$(awk '/^Uid:/{print $2}' /proc/$pid/status)
+  user=$(getent passwd $uid | tail -1 | awk -F: '{print $1}')
+  pr=$(awk '{print $18}' $i)
+  ni=$(awk '{print $19}' $i)
+  virt=$(awk '{printf("%d", $23/1024)}' $i)
+  
+  name=$(awk '{print $2}' $i)
+  name=${name:1:-1}
 
-  if [[ "$curr" == "R" ]]; then
-    (( running += 1 ))
-  elif [[ "$curr" == "T" ]]; then
-    (( stopped += 1 ))
-  elif [[ "$curr" == "Z" ]]; then
-    (( zombie += 1 ))
-  else
-    (( sleeping += 1 ))
+  state=$(awk '{print $3}' $i)
+  user=$(getent passwd $uid | tail -1 | awk -F: '{print $1}')
+
+  user_len=`echo $user |awk '{print length}'`
+  if [ $user_len -gt 7 ]; then
+    user=${user:0:7}
   fi
 
-  (( total += 1 ))
+  PROCESS_UTIME=${PROCESS_STAT[13]}
+  PROCESS_STIME=${PROCESS_STAT[14]}
+  PROCESS_STARTTIME=${PROCESS_STAT[21]}
+  SYSTEM_UPTIME_SEC=$(tr . ' ' </proc/uptime | awk '{print $1}')
 
-done
-echo "Glepka-top: $time, load avarage: $load_avarage"
-echo "Tasks: $total total, $running running, $sleeping sleeping, $stopped stopped, $zombie zombie"
+  CLK_TCK=$(getconf CLK_TCK)
 
+  let PROCESS_UTIME_SEC="$PROCESS_UTIME / $CLK_TCK"
+  let PROCESS_STIME_SEC="$PROCESS_STIME / $CLK_TCK"
+  let PROCESS_STARTTIME_SEC="$PROCESS_STARTTIME / $CLK_TCK"
+
+  let PROCESS_ELAPSED_SEC="$SYSTEM_UPTIME_SEC - $PROCESS_STARTTIME_SEC"
+  let PROCESS_USAGE_SEC="$PROCESS_UTIME_SEC + $PROCESS_STIME_SEC"
+  let PROCESS_USAGE="$PROCESS_USAGE_SEC * 100 / $PROCESS_ELAPSED_SEC"
+
+  process_time=$(awk '{ printf ("%dh:%dm:%ds ", ($13 + $14)%86400/3600, ($13 + $14)%3600/60,($13 + $14)%60 )}' $i)
+  
+  printf "$pid\t$user\t$pr\t$ni\t$virt\t$state\t$PROCESS_USAGE%%\t$process_time\t$name\n"
+done 
 
